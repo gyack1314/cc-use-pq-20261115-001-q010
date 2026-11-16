@@ -6,6 +6,7 @@ import zipfile
 from ..errors import require
 from ..values import canonical, fingerprint, identifier
 from ..analysis.cubes import MEASURES
+from ..metrics.dsl import explain
 
 
 TABLE_DIMENSIONS = {"origins": ["origin"], "destinations": ["destination"], "sources": ["source"],
@@ -48,9 +49,64 @@ class Export:
 
     def document(self, identity, published_only=False):
         edition = self.edition(identity, published_only)
-        return {"format": "autumn-ledger-edition-v1", "edition_id": identity,
-                "data_revision": edition["data_revision"], "result_digest": edition["result_digest"],
-                "result": edition["result"]}
+        freeze = edition["result"].get("metric_freeze")
+        document = {"format": "autumn-ledger-edition-v1", "edition_id": identity,
+                    "data_revision": edition["data_revision"], "result_digest": edition["result_digest"],
+                    "result": edition["result"]}
+        if freeze:
+            document["metric_definition_evidence"] = self.metric_evidence(identity)
+        return document
+
+    def metric_evidence(self, identity):
+        """可读的指标定义证据：冻结摘要 + 每个指标的人类可读算术展开，无任何可执行代码。"""
+        edition = self.edition(identity)
+        freeze = edition["result"].get("metric_freeze")
+        require(freeze, "no_metric_freeze", "该报告没有冻结自定义指标口径", 404)
+        definitions = []
+        for entry in freeze["entries"]:
+            definitions.append({"key": entry["key"], "version": entry["version"], "name": entry["name"],
+                                "state": entry["state"], "definition_digest": entry["definition_digest"],
+                                "unit": entry["expression"].get("unit"),
+                                "readable_definition": explain(entry["expression"])})
+        return {"schema": freeze["schema"], "freeze_digest": freeze["digest"],
+                "frozen_at": freeze.get("frozen_at"), "base_catalog": freeze.get("base_catalog"),
+                "definitions": definitions,
+                "replay_note": "证据按定义版本冻结；重命名或停用口径不会改写本文件，重放始终引用这些版本"}
+
+    def metric_values_csv(self, identity, period="current", published_only=False):
+        """导出各分组上的自定义指标三态值（含状态与零分母/不适用原因）。"""
+        edition = self.edition(identity, published_only)
+        result = edition["result"]
+        require(period in result["periods"], "unknown_period", "分析没有该期间")
+        freeze = result.get("metric_freeze")
+        require(freeze and freeze["entries"], "no_metric_freeze", "该报告没有可导出的自定义指标", 404)
+        headers = ["table", "dimensions", "metric_key", "metric_version", "status", "value", "reason", "unit"]
+        rows = []
+        cube = result["periods"][period]["cube"]
+        # 总计行
+        totals = cube["totals"].get("custom_metrics", {})
+        for key in sorted(totals):
+            item = totals[key]
+            rows.append({"table": "__totals__", "dimensions": "{}", "metric_key": key,
+                         "metric_version": self._frozen_version(freeze, key), "status": item["status"],
+                         "value": item["value"], "reason": item.get("reason") or "",
+                         "unit": canonical(item.get("unit")) if item.get("unit") else ""})
+        for table_name, table_rows in cube["tables"].items():
+            for row in table_rows:
+                dims = canonical(row.get("dimensions", {}))
+                for key, item in row["measures"].get("custom_metrics", {}).items():
+                    rows.append({"table": table_name, "dimensions": dims, "metric_key": key,
+                                 "metric_version": self._frozen_version(freeze, key), "status": item["status"],
+                                 "value": item["value"], "reason": item.get("reason") or "",
+                                 "unit": canonical(item.get("unit")) if item.get("unit") else ""})
+        return encode_csv(headers, rows)
+
+    @staticmethod
+    def _frozen_version(freeze, key):
+        for entry in freeze["entries"]:
+            if entry["key"] == key:
+                return entry["version"]
+        return ""
 
     def table(self, identity, table, period="current", published_only=False):
         require(table in TABLE_DIMENSIONS, "unknown_table", "未知统计表")
@@ -84,6 +140,12 @@ class Export:
         result = document["result"]
         files = {"edition.json": canonical(document).encode("utf-8"),
                  "lineage.csv": self.lineage(identity).encode("utf-8")}
+        if result.get("metric_freeze") and result["metric_freeze"].get("entries"):
+            files["metric-definitions.json"] = canonical(
+                document["metric_definition_evidence"]).encode("utf-8")
+            for period in result["periods"]:
+                files[f"{period}/metric-values.csv"] = self.metric_values_csv(
+                    identity, period, published_only).encode("utf-8")
         for period in result["periods"]:
             for table in TABLE_DIMENSIONS:
                 files[f"{period}/{table}.csv"] = self.table(identity, table, period, published_only).encode("utf-8")

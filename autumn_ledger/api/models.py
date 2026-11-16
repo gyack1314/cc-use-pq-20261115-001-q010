@@ -94,3 +94,35 @@ class AnomalyRequest(StrictModel):
     request: AnalysisRequest
     minimum_orders: StrictInt = 3
     multiplier: float = 3.0
+
+
+class MetricDefinitionRequest(StrictModel):
+    key: StrictStr
+    name: StrictStr
+    expression: dict[str, Any]
+    description: StrictStr = ""
+
+
+class MetricActivationRequest(StrictModel):
+    version: StrictInt
+    actor: StrictStr = "reviewer"
+    note: StrictStr
+
+
+class MetricDisableRequest(StrictModel):
+    expected_version: StrictInt
+    actor: StrictStr = "operator"
+    note: StrictStr
+
+
+class MetricRenameRequest(StrictModel):
+    name: StrictStr
+    actor: StrictStr = "operator"
+
+
+class MetricTrialRequest(StrictModel):
+    request: AnalysisRequest
+    candidate_key: StrictStr
+    candidate_version: StrictInt
+    actor: StrictStr = "analyst"
+    trial_id: StrictStr | None = None

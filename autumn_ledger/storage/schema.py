@@ -19,6 +19,10 @@ STATEMENTS = (
     "CREATE TABLE IF NOT EXISTS decisions (id INTEGER PRIMARY KEY AUTOINCREMENT, edition_id TEXT NOT NULL REFERENCES editions(id), edition_version INTEGER NOT NULL, action TEXT NOT NULL, actor TEXT NOT NULL, note TEXT NOT NULL, created_at TEXT NOT NULL)",
     "CREATE TABLE IF NOT EXISTS channels (name TEXT PRIMARY KEY, edition_id TEXT NOT NULL REFERENCES editions(id), generation INTEGER NOT NULL)",
     "CREATE TABLE IF NOT EXISTS publication_history (id INTEGER PRIMARY KEY AUTOINCREMENT, channel TEXT NOT NULL, generation INTEGER NOT NULL, edition_id TEXT NOT NULL REFERENCES editions(id), actor TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(channel,generation))",
+    "CREATE TABLE IF NOT EXISTS metric_definitions (key TEXT NOT NULL, version INTEGER NOT NULL, state TEXT NOT NULL CHECK(state IN ('draft','active','disabled')), name TEXT NOT NULL, description TEXT NOT NULL, expression TEXT NOT NULL, definition_digest TEXT NOT NULL, revision INTEGER NOT NULL, created_at TEXT NOT NULL, activated_at TEXT, PRIMARY KEY(key,version))",
+    "CREATE INDEX IF NOT EXISTS metric_state ON metric_definitions(state,key)",
+    "CREATE TABLE IF NOT EXISTS metric_decisions (id INTEGER PRIMARY KEY AUTOINCREMENT, metric_key TEXT NOT NULL, metric_version INTEGER NOT NULL, action TEXT NOT NULL, actor TEXT NOT NULL, note TEXT NOT NULL, revision INTEGER NOT NULL, created_at TEXT NOT NULL)",
+    "CREATE TABLE IF NOT EXISTS metric_trials (id TEXT PRIMARY KEY, request_key TEXT NOT NULL, data_revision INTEGER NOT NULL, candidate_key TEXT NOT NULL, candidate_version INTEGER NOT NULL, baseline_freeze TEXT NOT NULL, candidate_freeze TEXT NOT NULL, result TEXT NOT NULL, result_digest TEXT NOT NULL, actor TEXT NOT NULL, created_at TEXT NOT NULL)",
 )
 
 

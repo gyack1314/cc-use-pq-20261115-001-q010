@@ -9,7 +9,8 @@ from ..analysis.narrative import explain_result
 from ..analysis.trends import robust_flags
 from .models import (CatalogWrite, CalendarWrite, CoverageWrite, EventBatch, FileBatch, FileInspect,
                      AnalysisRequest, EditionRequest, DecisionRequest, PublishRequest, RetireRequest,
-                     EditionComparison, ProfileRequest, AnomalyRequest)
+                     EditionComparison, ProfileRequest, AnomalyRequest, MetricDefinitionRequest,
+                     MetricActivationRequest, MetricDisableRequest, MetricRenameRequest, MetricTrialRequest)
 
 
 def request_value(value):
@@ -296,5 +297,63 @@ def create_app(path=None):
     @app.get("/publication-consistency")
     def publication_consistency():
         return ledger.publication_readiness.published_consistency()
+
+    # ---- 版本化指标口径 -------------------------------------------------
+    @app.put("/metrics")
+    def register_metric(body: MetricDefinitionRequest):
+        return ledger.metrics.register(request_value(body))
+
+    @app.get("/metrics")
+    def list_metrics(state: str | None = None, limit: int = 100, offset: int = 0):
+        return ledger.metrics.list(state, limit, offset)
+
+    @app.get("/metrics/{key}")
+    def get_metric(key: str, version: int | None = None):
+        return ledger.metrics.get(key, version)
+
+    @app.get("/metrics/{key}/history")
+    def metric_history(key: str):
+        return ledger.metrics.history(key)
+
+    @app.get("/metric-decisions")
+    def metric_decisions(key: str | None = None, limit: int = 100, offset: int = 0):
+        return ledger.metrics.decisions(key, limit, offset)
+
+    @app.post("/metrics/{key}/activate")
+    def activate_metric(key: str, body: MetricActivationRequest):
+        return ledger.metrics.activate(key, body.version, body.actor, body.note)
+
+    @app.post("/metrics/{key}/disable")
+    def disable_metric(key: str, body: MetricDisableRequest):
+        return ledger.metrics.disable(key, body.expected_version, body.actor, body.note)
+
+    @app.post("/metrics/{key}/rename")
+    def rename_metric(key: str, body: MetricRenameRequest):
+        return ledger.metrics.rename(key, body.name, body.actor)
+
+    @app.post("/metric-trials")
+    def run_metric_trial(body: MetricTrialRequest):
+        payload = request_value(body)
+        return ledger.metric_trials.run_trial(payload["request"], payload["candidate_key"],
+                                               payload["candidate_version"], payload["actor"],
+                                               payload.get("trial_id"))
+
+    @app.get("/metric-trials")
+    def list_metric_trials(limit: int = 100, offset: int = 0):
+        return ledger.metric_trials.list(limit, offset)
+
+    @app.get("/metric-trials/{trial_id}")
+    def get_metric_trial(trial_id: str):
+        return ledger.metric_trials.get(trial_id)
+
+    @app.get("/editions/{identity}/metric-evidence")
+    def metric_evidence(identity: str):
+        return ledger.export.metric_evidence(identity)
+
+    @app.get("/editions/{identity}/metric-values.csv")
+    def metric_values_csv(identity: str, period: str = "current"):
+        content = ledger.export.metric_values_csv(identity, period)
+        return Response(content, media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="{identity}-metric-values.csv"'})
 
     return app

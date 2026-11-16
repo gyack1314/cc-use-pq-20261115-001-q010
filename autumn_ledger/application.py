@@ -5,6 +5,8 @@ from .reference.coverage import Coverage
 from .records.intake import Intake
 from .records.csv_input import FileIntake
 from .analysis.engine import AnalysisEngine
+from .metrics.registry import MetricRegistry
+from .metrics.trials import MetricTrials
 from .editions.service import Editions
 from .editions.review import Review
 from .editions.export import Export
@@ -23,7 +25,10 @@ class Ledger:
         self.coverage = Coverage(self.database, self.catalog)
         self.intake = Intake(self.database, self.catalog)
         self.files = FileIntake(self.intake)
-        self.analysis = AnalysisEngine(self.database, self.catalog, self.calendars, self.coverage, self.intake)
+        self.metrics = MetricRegistry(self.database)
+        self.analysis = AnalysisEngine(self.database, self.catalog, self.calendars, self.coverage,
+                                       self.intake, self.metrics)
+        self.metric_trials = MetricTrials(self.database, self.metrics, self.analysis)
         self.editions = Editions(self.database, self.analysis)
         self.review = Review(self.database, self.editions)
         self.export = Export(self.editions, self.review)

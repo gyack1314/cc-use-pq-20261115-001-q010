@@ -47,6 +47,33 @@ def segment_changes(current_rows, baseline_rows, dimension):
     return result
 
 
+def compare_custom_metrics(current_totals, baseline_totals):
+    """自定义指标的期间比较：沿用三态语义，零/缺报/不适用分别表达，绝不造无限增长率。"""
+    current_metrics = current_totals.get("custom_metrics", {})
+    baseline_metrics = baseline_totals.get("custom_metrics", {})
+    result = {}
+    for key in sorted(set(current_metrics) | set(baseline_metrics)):
+        left = current_metrics.get(key)
+        right = baseline_metrics.get(key)
+
+        def view(item):
+            if item is None:
+                return None
+            return {"status": item["status"], "value": item.get("value"), "reason": item.get("reason")}
+
+        entry = {"current": view(left), "baseline": view(right),
+                 "absolute_change": None, "relative_change": None, "baseline_zero": False,
+                 "comparable": False}
+        if left and right and left["status"] == "ok" and right["status"] == "ok":
+            entry["absolute_change"] = left["value"] - right["value"]
+            entry["baseline_zero"] = right["value"] == 0
+            entry["comparable"] = True
+            if right["value"] != 0:
+                entry["relative_change"] = (left["value"] - right["value"]) / right["value"]
+        result[key] = entry
+    return result
+
+
 def compare_periods(current, baseline, current_window, baseline_window, coverage_pairs):
     complete = all(pair["comparable"] for pair in coverage_pairs) and bool(coverage_pairs)
     current_count = len(current_window.days)
@@ -66,6 +93,7 @@ def compare_periods(current, baseline, current_window, baseline_window, coverage
         warnings.append("至少一个来源城市组合存在缺报，变化只描述已收到记录")
     warnings.append("平台订单为观察样本，变化不代表总体增量或校历政策因果效应")
     return {"totals": compare_measures(current["totals"], baseline["totals"]),
+            "custom_metrics": compare_custom_metrics(current["totals"], baseline["totals"]),
             "per_day": normalized, "coverage_pairs": coverage_pairs,
             "fully_comparable": complete, "day_alignment": pairs, "warnings": warnings,
             "origins": segment_changes(current["tables"]["origins"], baseline["tables"]["origins"], "origin"),

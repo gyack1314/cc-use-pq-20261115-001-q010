@@ -104,7 +104,8 @@ class Editions:
     def verify(self, identity):
         edition = self.get(identity)
         request = {**edition["request"], "revision": edition["data_revision"]}
-        fresh = self.engine.run(request)
+        # 重放必须使用创建时冻结的指标版本，确保停用/重命名/新启用都不改变历史结果
+        fresh = self.engine.run(request, metric_freeze=edition["result"].get("metric_freeze"))
         stored = edition["result"]
         checks = {"lineage": stored["lineage_digest"] == fresh["lineage_digest"],
                   "periods": stored["periods"] == fresh["periods"],

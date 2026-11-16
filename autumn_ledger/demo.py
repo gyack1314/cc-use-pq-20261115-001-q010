@@ -47,6 +47,41 @@ def seed(ledger, complete=True):
     return events
 
 
+def metric_demo(ledger, client):
+    """演示版本化指标口径：登记 -> 并行试算 -> 审核启用 -> 报告冻结 -> 历史重放。"""
+    net_per_traveler = {
+        "key": "net_per_traveler", "name": "每有效出游人净收入",
+        "description": "净收入除以有效出游人数，分母显式选择旅客口径",
+        "expression": {"type": "ratio",
+                       "numerator": {"type": "measure", "name": "net_cents"},
+                       "denominator": {"type": "exposure", "name": "travelers"}}}
+    draft = ledger.metrics.register(net_per_traveler)
+    # 同数据版本上与现行口径并行试算，不改变启用状态
+    trial = ledger.metric_trials.run_trial(request_data(), draft["key"], draft["version"],
+                                           "analyst", "demo-trial-1")
+    assert trial["candidate"] == {"key": "net_per_traveler", "version": draft["version"]}
+    assert ledger.metrics.get(draft["key"])["state"] == "draft"
+    activated = ledger.metrics.activate(draft["key"], draft["version"], "reviewer", "口径核对通过")
+    assert activated["metric"]["state"] == "active"
+    # 启用后新建报告才冻结该口径；老报告保持不变
+    metric_edition = client.post("/editions", json={"request_key": "demo-metric",
+                                                     "request": request_data()})
+    assert metric_edition.status_code == 200, metric_edition.text
+    identity = metric_edition.json()["id"]
+    result = ledger.editions.get(identity)["result"]
+    metric = result["periods"]["current"]["cube"]["totals"]["custom_metrics"]["net_per_traveler"]
+    assert metric["status"] == "ok"
+    assert result["metric_freeze"]["digest"]
+    evidence = ledger.export.metric_evidence(identity)
+    assert evidence["definitions"][0]["readable_definition"]
+    # 停用不影响历史重放
+    ledger.metrics.disable("net_per_traveler", draft["version"], "operator", "演示停用")
+    assert ledger.editions.verify(identity)["ok"]
+    return {"metric_registered": draft["key"], "metric_version": draft["version"],
+            "trial_id": "demo-trial-1", "frozen_value": metric["value"],
+            "replay_after_disable": True}
+
+
 def run_demo():
     with tempfile.TemporaryDirectory(prefix="autumn-demo-") as directory:
         app = create_app(Path(directory) / "ledger.sqlite3")
@@ -68,6 +103,7 @@ def run_demo():
             bundle = client.get(f"/editions/{identity}/export.zip")
             assert bundle.status_code == 200
             assert ledger.export.verify_bundle(bundle.content)["ok"]
+            metric_summary = metric_demo(ledger, client)
             revision = ledger.database.revision()
             update = synthetic_event("a1", sequence=2, refund=10000)
             correction = client.post("/sources/alpha/batches", json={"batch_id": "correction", "events": [update]})
@@ -84,4 +120,4 @@ def run_demo():
             return {"ok": True, "orders": 3, "original_net_cents": 120000, "corrected_net_cents": 110000,
                     "stale_publish_blocked": True, "old_snapshot_reproduced": True,
                     "bundle_verified": True, "revision_before_correction": revision,
-                    "final_revision": ledger.database.revision()}
+                    "final_revision": ledger.database.revision(), **metric_summary}
